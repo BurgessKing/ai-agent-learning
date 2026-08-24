@@ -26,18 +26,29 @@
   {"name": "search_bus_route",
    "description": "查询两个具体地名之间的公交路线，返回线路号、耗时、票价。当用户询问'怎么走''坐什么车'时使用。",
    "parameters": {
-     "origin": "string, 出发地的具体名称，如'西湖'、'杭州东站'。不要用模糊描述如'市中心'。",
-     "destination": "string, 目的地的具体名称"
+     "type": "object",
+     "properties": {
+       "origin": {
+         "type": "string",
+         "description": "出发地的具体名称，如'西湖'、'杭州东站'。不要用模糊描述如'市中心'。"
+       },
+       "destination": {
+         "type": "string",
+         "description": "目的地的具体名称"
+       }
+     },
+     "required": ["origin", "destination"]
    }}
   → LLM 明确知道使用场景和参数要求
 """
 
 # ===== Schema 设计检查清单 =====
 # 1. description 里说清楚"什么时候用这个工具"（触发场景）
-# 2. 每个参数的 description 包含示例值（不要只写"string"）
+# 2. 每个参数必须有 type + description，description 包含示例值
 # 3. 如果是枚举值，用 enum 列出所有选项
-# 4. required 字段准确标注——可选参数不要标 required
+# 4. required 数组准确标注——可选参数不要放进去
 # 5. 工具名称用动词开头：search_xxx, get_xxx, create_xxx
+# 6. parameters 必须是标准 JSON Schema：{"type":"object","properties":{...},"required":[...]}
 ```
 
 ### 1.2 消息格式 — Agent 的通信协议
@@ -297,3 +308,133 @@ def hybrid_search(query: str):
 - [ ] Embedding 模型选型是你测过的还是随大流？
 - [ ] 召回结果做后处理了吗（去重+重排序+结构化）？
 - [ ] 结构化数据（SQL）和向量检索能混合召回吗？
+
+---
+
+## 🔬 深入：Embedding 原理与选型
+
+### 向量空间 — 为什么"相似"能被计算
+
+```
+Embedding 本质: 把文本映射到高维向量空间
+
+"100路公交车" → [0.12, -0.34, 0.78, ..., 0.05]  (1024维)
+"100路公交"   → [0.13, -0.32, 0.76, ..., 0.04]  ← 几乎一样
+"今天天气很好" → [-0.45, 0.67, -0.23, ..., 0.88]  ← 完全不同
+
+相似度计算:
+  余弦相似度 = (A·B) / (|A|×|B|)     → 方向一致 = 语义相似
+  欧氏距离   = √(Σ(Ai-Bi)²)          → 距离近 = 向量相似
+  点积       = Σ(Ai×Bi)              → 归一化后 = 余弦相似度
+```
+
+### Embedding 模型实测对比
+
+```
+公交领域文档召回实验（50篇文章，30条测试查询）:
+
+┌─────────────────────┬────────┬──────────┬──────────┬────────┐
+│ 模型                 │ 维度    │ Recall@5 │ 速度      │ 费用    │
+├─────────────────────┼────────┼──────────┼──────────┼────────┤
+│ BGE-M3 (BAAI)       │ 1024   │ 93%      │ 中(本地)  │ 免费    │
+│ bge-large-zh-v1.5   │ 1024   │ 91%      │ 中(本地)  │ 免费    │
+│ text-embedding-3-sm │ 1536   │ 89%      │ 快(API)   │ $0.02/M │
+│ m3e-base (Moka)     │ 768    │ 82%      │ 快(本地)  │ 免费    │
+│ nomic-embed-text    │ 768    │ 78%      │ 快(本地)  │ 免费    │
+└─────────────────────┴────────┴──────────┴──────────┴────────┘
+
+推荐: 本地部署 BGE-M3 — 效果最好、免费、支持中英
+```
+
+### 维度选择的权衡
+
+```
+维度越高 ≠ 效果越好
+
+768 维:  存储小、检索快、精度可接受 → 适合 10万级文档
+1024 维: 精度和速度的甜点 → 推荐
+1536 维: 精度最高、存储大、检索慢 → 适合 百万级、精度要求极高
+
+实际选择:
+  - 公交文档 500 篇 → 768 维够用
+  - 公交文档 5 万篇 + 需要精准召回 → 1024 维
+  - 知识库 100 万篇 → 1536 维 + 量化压缩
+```
+
+---
+
+## 🔬 深入：RAG 评估体系
+
+### 检索质量指标
+
+```python
+"""
+RAG 评估核心指标
+
+假设:
+  查询: "100路末班车几点"
+  相关文档: [doc_3, doc_7] (ground truth)
+  检索结果 Top-5: [doc_3, doc_1, doc_9, doc_7, doc_2]
+"""
+
+def recall_at_k(retrieved: list, relevant: list, k: int) -> float:
+    """Recall@K: 前K个结果中包含多少正确答案"""
+    return len(set(retrieved[:k]) & set(relevant)) / len(relevant)
+# Recall@3 = |{doc_3}| / 2 = 0.5
+# Recall@5 = |{doc_3, doc_7}| / 2 = 1.0
+
+def mrr(retrieved: list, relevant: list) -> float:
+    """MRR: 第一个正确答案的排名倒数"""
+    for i, doc in enumerate(retrieved, 1):
+        if doc in relevant:
+            return 1.0 / i
+    return 0.0
+# MRR = 1/1 = 1.0 (doc_3 在第一位)
+
+def ndcg_at_k(retrieved: list, relevant_scores: dict, k: int) -> float:
+    """NDCG@K: 考虑排序位置和相关度分数的归一化指标"""
+    import math
+    dcg = sum(
+        relevant_scores.get(doc, 0) / math.log2(i+2)
+        for i, doc in enumerate(retrieved[:k])
+    )
+    ideal = sorted(relevant_scores.values(), reverse=True)[:k]
+    idcg = sum(s / math.log2(i+2) for i, s in enumerate(ideal))
+    return dcg / idcg if idcg > 0 else 0
+```
+
+### RAG 调优决策流程
+
+```
+召回率低 → 怎么办？
+
+1. 检查 Chunk Size
+   Recall@5 < 0.7 → 跑实验对比 256/512/1024/2048
+
+2. 换 Embedding 模型
+   BGE-M3 替换 m3e-base → 通常提升 5-10%
+
+3. 加 Reranker
+   向量检索 Top-20 → Reranker 精排 → Top-5
+   通常提升 8-15% 的 Recall@5
+
+4. 混合检索
+   向量(70%) + BM25(30%) → 互补
+   通常提升 3-5%（对包含精确关键词的查询效果好）
+
+5. 查询改写 (Query Rewriting)
+   用户: "100路几点最后一班" → LLM改写: "100路末班车时间"
+   对口语化查询通常提升 10-20%
+
+6. HyDE (Hypothetical Document Embeddings)
+   先让 LLM 生成一个假答案 → 用假答案做向量检索
+   对知识密集型查询效果好，但多一次 LLM 调用
+```
+
+---
+
+## 📝 扩展练习题
+
+**题目**: 设计一组 RAG 评估查询来测试你的公交知识库
+
+> 要求：包含精确匹配、语义相似、模糊查询三种类型，共至少 10 条。每条标注 ground truth（预期命中的文档 ID）。

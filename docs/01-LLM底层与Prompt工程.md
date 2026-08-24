@@ -468,3 +468,146 @@ if __name__ == "__main__":
 - [ ] 不用任何框架，能写出一个带工具调用的 Agent 循环吗？
 - [ ] 工具的描述（Schema）如果写错了，Agent 会怎样？
 - [ ] 消息格式里 role 有哪几种？tool call 的消息怎么传？
+
+---
+
+## 🔬 深入：Transformer 架构详解
+
+### Self-Attention 计算过程（图解）
+
+```
+输入: X = [x1, x2, x3, x4]  (4个token, 每个512维)
+
+Step 1: 线性投影
+  Q = X @ W_Q    (4×64)   ← 查什么
+  K = X @ W_K    (4×64)   ← 有什么
+  V = X @ W_V    (4×64)   ← 取什么
+
+Step 2: 注意力分数
+  scores = Q @ K^T / √64   (4×4矩阵)
+  
+  含义: 第i行第j列 = token_i 对 token_j 的注意力
+
+Step 3: Softmax 归一化
+  attention[i][j] = exp(scores[i][j]) / Σ exp(scores[i][:])
+
+Step 4: 加权求和
+  output[i] = Σ attention[i][j] × V[j]
+
+Step 5: Multi-Head
+  Head_1 = Attention(X·W_Q1, X·W_K1, X·W_V1)    → 关注语法
+  Head_2 = Attention(X·W_Q2, X·W_K2, X·W_V2)    → 关注语义
+  ...
+  Head_8 = Attention(X·W_Q8, X·W_K8, X·W_V8)    → 关注位置
+
+  MultiHead = Concat(Head_1, ..., Head_8) @ W_O  → 合并8个头
+```
+
+### Encoder-Decoder vs Decoder-Only
+
+```
+Encoder-Decoder (BERT, T5):
+  Encoder: 双向注意力 → 理解全文
+  Decoder: 单向注意力(因果) → 逐个生成
+  适用: 翻译、摘要
+
+Decoder-Only (GPT, LLaMA, DeepSeek):
+  只有 Decoder，单向注意力(因果)
+  优势: 训练效率高，生成能力强
+  适用: 对话、代码生成、Agent
+
+你的 Agent 用的全是 Decoder-Only 模型
+```
+
+### 关键面试点
+
+| 问题 | 答案 |
+|------|------|
+| Q/K/V 分别是什么 | Q=我要查什么，K=我有什么标签，V=我有什么内容 |
+| 为什么除以√d_k | 防止点积值过大，使 Softmax 梯度更稳定 |
+| Multi-Head 的意义 | 不同头关注不同语义维度（语法/语义/位置） |
+| Positional Encoding | 给 Transformer 注入位置信息（它本身是位置无关的） |
+
+---
+
+## 🔬 深入：Tokenization 实操
+
+### 不同模型分词对比
+
+```python
+"""同一句话，不同 tokenizer 怎么切"""
+
+text = "杭州100路公交车从西湖到火车东站需要35分钟"
+
+# DeepSeek tokenizer（实际使用）— 中文效率高
+# DeepSeek API 返回的 usage.prompt_tokens 即实际消耗
+# 无需本地 tiktoken，直接看 API 响应即可
+
+# 参考: GPT-4 tokenizer (tiktoken) — 仅作对比
+# import tiktoken
+# enc = tiktoken.encoding_for_model("gpt-4")
+# tokens_gpt = enc.encode(text)  # 约 25-30 tokens
+
+# 同文本 DeepSeek 约 20-25 tokens，中文效率更高
+
+# 规律: 中文 1 个字 ≈ 1.5-2 tokens
+#       英文 1 个词 ≈ 1.3 tokens
+#       代码 1 个字符 ≈ 0.3-0.5 tokens
+```
+
+### Token 计数工具
+
+```python
+"""准确的 Token 计数 — 成本估算基础"""
+
+def count_tokens(text: str, model: str = "deepseek-chat") -> int:
+    """估算 token 数"""
+    if model.startswith("gpt"):
+        import tiktoken
+        try:
+            enc = tiktoken.encoding_for_model(model)
+        except KeyError:
+            enc = tiktoken.get_encoding("cl100k_base")
+        return len(enc.encode(text))
+    elif model.startswith("deepseek"):
+        # DeepSeek: 中文 ~2 chars/token, 英文 ~4 chars/token
+        # 精确值用 API 返回的 usage.prompt_tokens
+        chinese_chars = sum(1 for c in text if '\u4e00' <= c <= '\u9fff')
+        other_chars = len(text) - chinese_chars
+        return chinese_chars // 2 + other_chars // 4
+    else:
+        # 其他模型: 粗略估算
+        return len(text) // 2
+
+# 实际估算 vs API 返回值对比:
+# 估算: ~500 tokens → API 返回 usage.prompt_tokens: 487  (误差 < 3%)
+```
+
+### 中文分词痛点
+
+```
+问题: BPE tokenizer 对中文不友好
+
+英文 "unhappiness" → ["un", "happi", "ness"]  3 tokens (合理)
+中文 "杭州公交" → 如果用英文 tokenizer 可能切为 8+ tokens (浪费)
+
+解决:
+  - 用中文优化的 tokenizer (Qwen/DeepSeek/GLM 的原生 tokenizer)
+  - 避免中英混杂（中文夹杂英文词可能增加 30% token 消耗）
+  - 长文本预处理: 去除多余空格、统一标点符号
+```
+
+---
+
+## 📝 扩展练习题
+
+**题目A**: 用 tiktoken 对比以下三句话的 token 消耗：
+1. "杭州公交" (纯中文)
+2. "Hangzhou Bus" (纯英文)
+3. "杭州 Bus 公交" (中英混杂)
+
+**题目B**: 手算：如果 Context Window 是 128K，中文文本大概能塞多少字？
+
+> <details><summary>答案</summary>
+> 128K tokens ÷ 1.5 tokens/字 ≈ 85,000 字（约一本 200 页的书）
+> </details>

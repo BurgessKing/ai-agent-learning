@@ -1,6 +1,6 @@
 # 从Java架构师到AI Agent开发工程师 — 1个月高强度学习计划 v2.0
 
-> **目标画像**：35岁Java架构师，公共交通领域背景（长保班车+散包旅游），擅长数据分析
+> **目标画像**：35岁Java架构师，公共交通领域背景（长包班车+散包旅游），擅长数据分析
 > **目标**：杭州 30-40K AI Agent 岗位
 > **学习周期**：4周，每天6-8小时
 >
@@ -163,7 +163,156 @@ Level 4: 多源融合上下文
    - 代表: ChatGPT 的核心训练方法
 ```
 
-### B4：Multi-Agent 协作协议深入
+#### B4：Multi-Agent 协作协议深入
+
+### B4: Multi-Agent 协作协议 — 消息传递与通信
+
+```python
+"""
+Agent 间通信的标准消息格式
+类比: 微服务间用 OpenAPI 定义接口，Agent 间也需要标准协议
+"""
+
+from pydantic import BaseModel
+from enum import Enum
+from typing import Any, Optional
+from datetime import datetime
+
+class MessageType(str, Enum):
+    TASK_DELEGATION = "task_delegation"     # 分配任务
+    STATUS_UPDATE = "status_update"          # 状态更新
+    RESULT_RETURN = "result_return"          # 返回结果
+    CLARIFICATION = "clarification"          # 请求澄清
+    CONFLICT_ALERT = "conflict_alert"        # 冲突告警
+
+class AgentMessage(BaseModel):
+    """Agent 间通信标准消息"""
+    message_id: str
+    from_agent: str
+    to_agent: str                          # "all" 表示广播
+    type: MessageType
+    payload: dict[str, Any]
+    parent_task_id: Optional[str] = None   # 关联的父任务
+    priority: int = 3                       # 1=最高, 5=最低
+    timestamp: str = ""
+
+# ===== 实际消息示例 =====
+
+# 调度 Agent → 车辆 Agent
+dispatch_to_vehicle = AgentMessage(
+    message_id="MSG-001",
+    from_agent="DispatchAgent",
+    to_agent="VehicleAgent",
+    type=MessageType.TASK_DELEGATION,
+    payload={
+        "task": "allocate_vehicles",
+        "route_id": "R001",
+        "date": "2024-01-15",
+        "passenger_count": 35,
+        "deadline": "2024-01-14T18:00:00Z"
+    },
+    priority=1
+)
+
+# 车辆 Agent → 调度 Agent
+vehicle_to_dispatch = AgentMessage(
+    message_id="MSG-002",
+    from_agent="VehicleAgent",
+    to_agent="DispatchAgent",
+    type=MessageType.RESULT_RETURN,
+    payload={
+        "task": "allocate_vehicles",
+        "allocated": [
+            {"vehicle_id": "V001", "plate": "浙A12345", "seats": 50},
+            {"vehicle_id": "V003", "plate": "浙A67890", "seats": 45}
+        ],
+        "warnings": ["V003 下午有保养计划"]
+    },
+    parent_task_id="MSG-001"
+)
+```
+
+### Orchestrator 模式实现
+
+```python
+"""层级调度 — Supervisor Agent 分发任务"""
+
+class OrchestratorAgent:
+    """总调度 Agent — 类似微服务的 API Gateway"""
+
+    def __init__(self, sub_agents: dict[str, callable]):
+        self.sub_agents = sub_agents
+
+    async def execute(self, user_input: str) -> str:
+        # Step 1: 任务分解（Plan）
+        plan = await self._plan(user_input)
+        # plan = [
+        #   {"agent": "VehicleAgent", "task": "查询可用车辆"},
+        #   {"agent": "DriverAgent", "task": "查询可用司机"},
+        #   {"agent": "PriceAgent", "task": "计算报价"}
+        # ]
+
+        # Step 2: 并行派发（并发执行独立任务）
+        tasks = []
+        for step in plan:
+            agent_name = step["agent"]
+            task = step["task"]
+            if agent_name in self.sub_agents:
+                tasks.append(self.sub_agents[agent_name](task))
+
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # Step 3: 汇总结果
+        summary = await self._summarize(user_input, plan, results)
+        return summary
+
+    async def _plan(self, user_input: str) -> list:
+        """LLM 分解任务 → 决定派给哪些 Agent"""
+        # 实际调用 LLM 生成计划
+        return [
+            {"agent": "VehicleAgent", "task": "查R001可用车辆"},
+            {"agent": "DriverAgent", "task": "查R001可用司机"},
+        ]
+```
+
+### 冲突解决机制
+
+```python
+"""
+Multi-Agent 冲突场景与解决
+
+场景: 调度 Agent 和 报价 Agent 同时操作同一订单
+  调度 Agent: 分配了车辆 V001
+  报价 Agent: 基于 V001 计算了价格
+  问题: 车辆被其他调度员抢走 → 报价失效
+
+解决:
+  1. 乐观锁: 每个 Agent 操作前检查版本号
+  2. 分布式锁: Redis SETNX 锁定资源
+  3. 事件通知: 车辆被释放时发布事件，报价 Agent 重算
+"""
+
+def resolve_conflict(action_a: dict, action_b: dict) -> dict:
+    """冲突裁决"""
+    priority_order = ["调度", "报价", "通知"]
+
+    if action_a["resource"] == action_b["resource"]:
+        # 按优先级决定: 调度 > 报价
+        a_priority = priority_order.index(action_a.get("type", "通知"))
+        b_priority = priority_order.index(action_b.get("type", "通知"))
+
+        winner = action_a if a_priority < b_priority else action_b
+        loser = action_b if winner is action_a else action_a
+
+        return {
+            "winner": winner,
+            "loser": loser,
+            "reason": f"{winner['type']}优先级高于{loser['type']}",
+            "loser_action": "retry"  # 通知 loser 重新执行
+        }
+
+    return {"conflict": False}
+```
 
 **消息格式标准化**：
 

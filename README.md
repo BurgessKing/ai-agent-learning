@@ -15,12 +15,15 @@
 
 | # | 模块 | 核心内容 | 周期 |
 |---|------|----------|------|
-| 01 | [LLM底层与Prompt工程](./docs/01-LLM底层与Prompt工程.md) | 原生API调用、Token计算、SystemPrompt、Few-shot/CoT、零框架手写Agent | Day 1-7 |
-| 02 | [ToolUse与RAG实战](./docs/02-ToolUse与RAG实战.md) | Function Calling消息格式、Schema设计、RAG分块实验、混合检索、召回后处理 | Day 8-14 |
-| 03 | [Agent深度概念](./docs/03-Agent深度概念.md) | Plan-and-Execute、Multi-Agent协作、上下文工程四层、模型调优决策树 | Day 15-18 |
-| 04 | [框架与工程化](./docs/04-框架与工程化.md) | LangChain(确认层)、上下文窗口管理、Token成本控制、可观测性、降级容错 | Day 19-21 |
-| 05 | [公交平台AI融合架构](./docs/05-公交平台AI融合架构.md) | ⭐ 终极项目：真实公交出行平台 + AI Agent 全栈融合（调度 + 报价） | Day 22-28 |
+| 01 | [LLM底层与Prompt工程](./docs/01-LLM底层与Prompt工程.md) | 原生API调用、Token计算、SystemPrompt、Few-shot/CoT、手写Agent、Transformer深入、Tokenization | Day 1-7 |
+| 02 | [ToolUse与RAG实战](./docs/02-ToolUse与RAG实战.md) | Function Calling、Schema设计、RAG分块实验、Embedding选型、混合检索、RAG评估体系 | Day 8-14 |
+| 03 | [Agent深度概念](./docs/03-Agent深度概念.md) | Plan-and-Execute、Multi-Agent协作、上下文工程四层、模型调优、通信协议、冲突解决 | Day 15-18 |
+| 04 | [框架与工程化](./docs/04-框架与工程化.md) | LangChain、上下文管理、Token成本、可观测性、降级容错、流式输出全链路 | Day 19-21 |
+| 05 | [公交平台AI融合架构](./docs/05-公交平台AI融合架构.md) | ⭐ 终极项目：公交出行平台 + AI Agent 全栈融合（调度 + 报价） | Day 22-28 |
 | 06 | [面试题与学习资源](./docs/06-面试题与学习资源.md) | 13道高频面试题、学习资源、4周作息表 | — |
+| 07 | [AI基础设施与部署](./docs/07-AI基础设施与部署.md) | 🆕 GPU选型、模型部署(vLLM/Ollama)、微调全链路、LoRA/QLoRA、模型量化 | — |
+| 08 | [Agent评估与安全](./docs/08-Agent评估与安全.md) | 🆕 评估体系(任务完成率/LLM-as-Judge)、RAG评估(Recall/MRR)、安全(Prompt注入/权限/脱敏) | — |
+| 09 | [多模态与MCP协议](./docs/09-多模态与MCP协议.md) | 🆕 多模态Agent(Vision/OCR/语音)、MCP协议规范与实践、Agent前沿方向 | — |
 
 ## 🛠 配套实战
 
